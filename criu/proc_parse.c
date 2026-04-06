@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -834,17 +835,33 @@ int parse_smaps(pid_t pid, struct vm_area_list *vma_area_list, dump_filemap_t du
 		int num, path_off;
 		bool eof;
 		char *str;
+		bool ignoring = false;
 
 		str = breadline(&f);
 		if (IS_ERR(str))
 			goto err;
 		eof = (str == NULL);
 
+		/* Ignore libenclavecriu.so */
+		if (!eof) {
+			const char internal_lib[] = "libenclavecriu.so";
+			if (strstr(str, internal_lib)) {
+				pr_info("Ignoring internal shared library: %s\n", internal_lib);
+				ignoring = true;
+				continue;
+			}
+		}
+
 		if (!eof && !__is_vma_range_fmt(str)) {
 			if (!strncmp(str, "VmFlags: ", 9)) {
-				BUG_ON(!vma_area);
-				parse_vma_vmflags(&str[9], vma_area);
-				continue;
+				if (!ignoring) {
+					BUG_ON(!vma_area);
+					parse_vma_vmflags(&str[9], vma_area);
+					continue;
+				} else {
+					ignoring = false;
+					continue;
+				}
 			} else
 				continue;
 		}
