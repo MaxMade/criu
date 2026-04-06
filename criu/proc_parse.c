@@ -2541,6 +2541,8 @@ int parse_threads(int pid, struct pid **_t, int *_n)
 	DIR *dir;
 	struct pid *t = NULL;
 	int nr = 1;
+	int dir_fd, fd, len;
+	char buf[256 + 5]; /* strlen(dr->dname) + strlen("/comm") + 1 */
 
 	if (*_t)
 		t = *_t;
@@ -2555,6 +2557,33 @@ int parse_threads(int pid, struct pid **_t, int *_n)
 		/* We expect numbers only here */
 		if (de->d_name[0] == '.')
 			continue;
+
+		/* Ignore helper thread */
+		dir_fd = dirfd(dir);
+		if (dir_fd != -1) {
+			/* Try to open /proc/<pid>/task/<tid>/comm */
+			snprintf(buf, sizeof(buf), "%s/comm", de->d_name);
+			fd = openat(dir_fd, buf, O_RDONLY);
+			if (fd != -1) {
+				/* Try to read /proc/<pid>/task/<tid>/comm */
+				len = read(fd, buf, sizeof(buf));
+				if (len != -1) {
+					buf[len] = '\0';
+					if (len > 0 && buf[len - 1] == '\n') {
+						buf[len - 1] = '\0';
+					}
+
+					/* Helper thread identified by ENCLAVE_CRIU */
+					if (strcmp(buf, "ENCLAVE_CRIU") == 0) {
+						pr_info("Ignoring CRIU helper thread %s\n", de->d_name);
+						close(fd);
+						continue;
+					}
+				}
+
+				close(fd);
+			}
+		}
 
 		if (*_t == NULL) {
 			tmp = xrealloc(t, nr * sizeof(struct pid));
